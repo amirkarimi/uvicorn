@@ -72,6 +72,10 @@ class UvicornWorker(Worker):
         for s in self.SIGNALS:
             signal.signal(s, signal.SIG_DFL)
 
+        signal.signal(signal.SIGUSR1, self.handle_usr1)
+        # Don't let SIGUSR1 disturb active requests by interrupting system calls
+        signal.siginterrupt(signal.SIGUSR1, False)
+
     async def _serve(self) -> None:
         self.config.app = self.wsgi
         server = Server(config=self.config)
@@ -80,9 +84,7 @@ class UvicornWorker(Worker):
             sys.exit(Arbiter.WORKER_BOOT_ERROR)
 
     def run(self) -> None:
-        if sys.version_info >= (3, 7):
-            return asyncio.run(self._serve())
-        return asyncio.get_event_loop().run_until_complete(self._serve())
+        return asyncio.run(self._serve())
 
     async def callback_notify(self) -> None:
         self.notify()

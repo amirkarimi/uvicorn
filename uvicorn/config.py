@@ -8,21 +8,33 @@ import socket
 import ssl
 import sys
 from pathlib import Path
-from typing import Awaitable, Callable, Dict, List, Optional, Tuple, Type, Union
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Awaitable,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Tuple,
+    Type,
+    Union,
+)
+
+from h11._connection import DEFAULT_MAX_INCOMPLETE_EVENT_SIZE
 
 from uvicorn.logging import TRACE_LOG_LEVEL
 
-if sys.version_info < (3, 8):
+if sys.version_info < (3, 8):  # pragma: py-gte-38
     from typing_extensions import Literal
-else:
+else:  # pragma: py-lt-38
     from typing import Literal
 
 import click
-from asgiref.typing import ASGIApplication
 
 try:
     import yaml
-except ImportError:
+except ImportError:  # pragma: no cover
     # If the code below that depends on yaml is exercised, it will raise a NameError.
     # Install the PyYAML package or the uvicorn[standard] optional dependencies to
     # enable this functionality.
@@ -30,10 +42,12 @@ except ImportError:
 
 from uvicorn.importer import ImportFromStringError, import_from_string
 from uvicorn.middleware.asgi2 import ASGI2Middleware
-from uvicorn.middleware.debug import DebugMiddleware
 from uvicorn.middleware.message_logger import MessageLoggerMiddleware
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 from uvicorn.middleware.wsgi import WSGIMiddleware
+
+if TYPE_CHECKING:
+    from asgiref.typing import ASGIApplication
 
 HTTPProtocolType = Literal["auto", "h11", "httptools"]
 WSProtocolType = Literal["auto", "none", "websockets", "wsproto"]
@@ -77,7 +91,7 @@ INTERFACES: List[InterfaceType] = ["auto", "asgi3", "asgi2", "wsgi"]
 SSL_PROTOCOL_VERSION: int = ssl.PROTOCOL_TLS_SERVER
 
 
-LOGGING_CONFIG: dict = {
+LOGGING_CONFIG: Dict[str, Any] = {
     "version": 1,
     "disable_existing_loggers": False,
     "formatters": {
@@ -104,7 +118,7 @@ LOGGING_CONFIG: dict = {
         },
     },
     "loggers": {
-        "uvicorn": {"handlers": ["default"], "level": "INFO"},
+        "uvicorn": {"handlers": ["default"], "level": "INFO", "propagate": False},
         "uvicorn.error": {"level": "INFO"},
         "uvicorn.access": {"handlers": ["access"], "level": "INFO", "propagate": False},
     },
@@ -125,7 +139,7 @@ def create_ssl_context(
     ctx = ssl.SSLContext(ssl_version)
     get_password = (lambda: password) if password else None
     ctx.load_cert_chain(certfile, keyfile, get_password)
-    ctx.verify_mode = cert_reqs
+    ctx.verify_mode = ssl.VerifyMode(cert_reqs)
     if ca_certs:
         ctx.load_verify_locations(ca_certs)
     if ciphers:
@@ -167,14 +181,14 @@ def resolve_reload_patterns(
     directories = list(map(Path, directories))
     directories = list(map(lambda x: x.resolve(), directories))
     directories = list(
-        set([reload_path for reload_path in directories if is_dir(reload_path)])
+        {reload_path for reload_path in directories if is_dir(reload_path)}
     )
 
     children = []
     for j in range(len(directories)):
         for k in range(j + 1, len(directories)):
             if directories[j] in directories[k].parents:
-                children.append(directories[k])
+                children.append(directories[k])  # pragma: py-darwin
             elif directories[k] in directories[j].parents:
                 children.append(directories[j])
 
@@ -194,7 +208,7 @@ def _normalize_dirs(dirs: Union[List[str], str, None]) -> List[str]:
 class Config:
     def __init__(
         self,
-        app: Union[ASGIApplication, Callable, str],
+        app: Union["ASGIApplication", Callable, str],
         host: str = "127.0.0.1",
         port: int = 8000,
         uds: Optional[str] = None,
@@ -203,33 +217,33 @@ class Config:
         http: Union[Type[asyncio.Protocol], HTTPProtocolType] = "auto",
         ws: Union[Type[asyncio.Protocol], WSProtocolType] = "auto",
         ws_max_size: int = 16 * 1024 * 1024,
-        ws_ping_interval: Optional[float] = 20,
-        ws_ping_timeout: Optional[float] = 20,
+        ws_ping_interval: Optional[float] = 20.0,
+        ws_ping_timeout: Optional[float] = 20.0,
+        ws_per_message_deflate: bool = True,
         lifespan: LifespanType = "auto",
         env_file: Optional[Union[str, os.PathLike]] = None,
-        log_config: Optional[Union[dict, str]] = LOGGING_CONFIG,
+        log_config: Optional[Union[Dict[str, Any], str]] = LOGGING_CONFIG,
         log_level: Optional[Union[str, int]] = None,
         access_log: bool = True,
         use_colors: Optional[bool] = None,
         interface: InterfaceType = "auto",
-        debug: bool = False,
         reload: bool = False,
         reload_dirs: Optional[Union[List[str], str]] = None,
-        reload_delay: Optional[float] = None,
+        reload_delay: float = 0.25,
         reload_includes: Optional[Union[List[str], str]] = None,
         reload_excludes: Optional[Union[List[str], str]] = None,
         workers: Optional[int] = None,
         proxy_headers: bool = True,
         server_header: bool = True,
         date_header: bool = True,
-        forwarded_allow_ips: Optional[str] = None,
+        forwarded_allow_ips: Optional[Union[List[str], str]] = None,
         root_path: str = "",
         limit_concurrency: Optional[int] = None,
         limit_max_requests: Optional[int] = None,
         backlog: int = 2048,
         timeout_keep_alive: int = 5,
         timeout_notify: int = 30,
-        callback_notify: Callable[..., Awaitable[None]] = None,
+        callback_notify: Optional[Callable[..., Awaitable[None]]] = None,
         ssl_keyfile: Optional[str] = None,
         ssl_certfile: Optional[Union[str, os.PathLike]] = None,
         ssl_keyfile_password: Optional[str] = None,
@@ -237,8 +251,9 @@ class Config:
         ssl_cert_reqs: int = ssl.CERT_NONE,
         ssl_ca_certs: Optional[str] = None,
         ssl_ciphers: str = "TLSv1",
-        headers: Optional[List[List[str]]] = None,
+        headers: Optional[List[Tuple[str, str]]] = None,
         factory: bool = False,
+        h11_max_incomplete_event_size: int = DEFAULT_MAX_INCOMPLETE_EVENT_SIZE,
     ):
         self.app = app
         self.host = host
@@ -251,15 +266,15 @@ class Config:
         self.ws_max_size = ws_max_size
         self.ws_ping_interval = ws_ping_interval
         self.ws_ping_timeout = ws_ping_timeout
+        self.ws_per_message_deflate = ws_per_message_deflate
         self.lifespan = lifespan
         self.log_config = log_config
         self.log_level = log_level
         self.access_log = access_log
         self.use_colors = use_colors
         self.interface = interface
-        self.debug = debug
         self.reload = reload
-        self.reload_delay = reload_delay or 0.25
+        self.reload_delay = reload_delay
         self.workers = workers or 1
         self.proxy_headers = proxy_headers
         self.server_header = server_header
@@ -279,9 +294,10 @@ class Config:
         self.ssl_cert_reqs = ssl_cert_reqs
         self.ssl_ca_certs = ssl_ca_certs
         self.ssl_ciphers = ssl_ciphers
-        self.headers: List[List[str]] = headers or []
+        self.headers: List[Tuple[str, str]] = headers or []
         self.encoded_headers: List[Tuple[bytes, bytes]] = []
         self.factory = factory
+        self.h11_max_incomplete_event_size = h11_max_incomplete_event_size
 
         self.loaded = False
         self.configure_logging()
@@ -352,6 +368,7 @@ class Config:
         if workers is None and "WEB_CONCURRENCY" in os.environ:
             self.workers = int(os.environ["WEB_CONCURRENCY"])
 
+        self.forwarded_allow_ips: Union[List[str], str]
         if forwarded_allow_ips is None:
             self.forwarded_allow_ips = os.environ.get(
                 "FORWARDED_ALLOW_IPS", "127.0.0.1"
@@ -371,6 +388,10 @@ class Config:
     @property
     def is_ssl(self) -> bool:
         return bool(self.ssl_keyfile or self.ssl_certfile)
+
+    @property
+    def use_subprocess(self) -> bool:
+        return bool(self.reload or self.workers > 1)
 
     def configure_logging(self) -> None:
         logging.addLevelName(TRACE_LOG_LEVEL, "TRACE")
@@ -490,8 +511,6 @@ class Config:
         elif self.interface == "asgi2":
             self.loaded_app = ASGI2Middleware(self.loaded_app)
 
-        if self.debug:
-            self.loaded_app = DebugMiddleware(self.loaded_app)
         if logger.level <= TRACE_LOG_LEVEL:
             self.loaded_app = MessageLoggerMiddleware(self.loaded_app)
         if self.proxy_headers:
@@ -504,7 +523,7 @@ class Config:
     def setup_event_loop(self) -> None:
         loop_setup: Optional[Callable] = import_from_string(LOOP_SETUPS[self.loop])
         if loop_setup is not None:
-            loop_setup(reload=self.reload)
+            loop_setup(use_subprocess=self.use_subprocess)
 
     def bind_socket(self) -> socket.socket:
         logger_args: List[Union[str, int]]
@@ -568,4 +587,4 @@ class Config:
 
     @property
     def should_reload(self) -> bool:
-        return isinstance(self.app, str) and (self.debug or self.reload)
+        return isinstance(self.app, str) and self.reload
